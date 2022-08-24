@@ -12,10 +12,10 @@ copy your config from the VM to your workspace/.config
 set this version to match release version like this, in order for kernel to find modules from initramfs
 * CONFIG_LOCALVERSION="-200.fc36.x86_64"
 
-disable the following in order not to prevent loading modules
-* CONFIG_SECURITY_LOCKDOWN_LSM
-* CONFIG_MODULE_SIG
-* CONFIG_MODULE_ALLOW_BTF_MISMATCH
+adjust the following in order not to prevent loading modules
+* CONFIG_SECURITY_LOCKDOWN_LSM=n
+* CONFIG_MODULE_SIG=n
+* CONFIG_MODULE_ALLOW_BTF_MISMATCH=y
 
 ## libvirt boot option for direct kernel boot
 ```
@@ -29,4 +29,15 @@ disable the following in order not to prevent loading modules
 ```
 
 # gdb extra
-TBD
+set gdb server and disable KASLR
+```
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+  <qemu:commandline>
+    <qemu:arg value='-gdb'/>
+    <qemu:arg value='tcp::1235'/>
+  </qemu:commandline>
+  <os>
+    <cmdline>$CMD nokaslr</cmdline>
+  </os>
+</domain>
+```
