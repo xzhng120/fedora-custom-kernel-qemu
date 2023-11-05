@@ -1,73 +1,98 @@
-# ARCH
+# Archlinux QEMU-GDB guide
 
+## prerequisite
 
-## on guest
-follow https://wiki.archlinux.org/title/Kernel/Traditional_compilation
+An archlinux VM managed by libvirt
 
-* `cd <kernel source tree>`
-* copy out `/proc/config.gz`  (zcat to kernel/.config)
-* `make nconfig` (or menuconfig) and set the kernel local version with something like "-gdb". also make other necessary changes
-* make sure to use `modprobed-db` to reduce unnecessary compilation
-  * `make LSMOD=\<your modprobed.db\> localmodconfig`
+## Shared the source between host and guest
 
-only the following steps are needed for new kernel version
-* `make` or `make -j<number of threads>`
-* `cp arch/x86/boot/bzImage /boot/vmlinuz_linux_gdb` (suggest not to use dash but instead underscore so grub doens't automatically pick up your kernel)
-  * (optional if you want to use direct kernel boot, grub does not support vmlinux, wtf???)
-* `make modules_install`
-* `mkinitcpio -k 6.4.9-gdb -g /boot/initramfs_linux_gdb.img` (replace major.minor.revision accordingly)
-* * (use the -k option matching your new kernel's `uname -r` you can find this based on /lib/modules/6.4.9-gdb)
-* `rm -rf /lib/modules/<old.kernel.ver>-gdb` as needed
-
-==========================================================
-
-* open /boot/grub/grub.cfg and find your default boot menuentry, copy to `/etc/grub.d/40_custom`, then modify the `linux` and `initrd` accordingly. When you are done, `grub-mkconfig -o /boot/grub/grub.cfg`
-  * doesn't seem necessary, grub seemingly auto detects /boot/vmlinuz-\* (but without nokaslr)
-  * optionally add `GRUB_TERMINAL_OUTPUT="console vga_text"` in /etc/default/grub so that you can boot into either kernel on a tty and gpu
-  * optional if direct kernel boot
-* reboot and select your own kernel on grub
-
-## on host
-copy out your kernel tree and do direct kernel boot:
-* `rsync -a --info=progress2 root@192.168.122.X:/root/linux <some place on the host>`
-* `ln -sf scripts/gdb/vmlinux-gdb.py ./` to improve gdb experience
-
-Sample cmdline, make sure to include nokaslr if you want gdb to work (this is for libvirt xml)
+create a shared directory on the host for the source then share it with the guest using virtiofs
 ```xml
+...
+    <filesystem type='mount' accessmode='passthrough'>
+      <driver type='virtiofs'/>
+      <source dir='<kernel source tree>'/>
+      <target dir='kernel-build'/>
+      <address type='pci' domain='...' bus='...' slot='...' function='...'/>
+    </filesystem>
+...
+```
+mount on guest by adding to `/etc/fstab`:
+`kernel-build            /root/linux-gdb virtiofs rw,relatime`
+
+## Compile the kernel
+
+Although doing all of the following on the guest should also work, however, it makes sense to use the host if not all CPUs are allocated to the guest.
+
+
+Prefix: H=host G=guest.  
+generally follow https://wiki.archlinux.org/title/Kernel/Traditional_compilation
+* H: obtain kernel source
+* G: copy out `/proc/config.gz`  (zcat to `<source>/.config`)
+* H: `make nconfig (or menuconfig)` and make necessary changes.  
+  suggestions below:
+  * General setup -> Local version: `CONFIG_LOCALVERSION=-gdb`  
+    **(you should do this to avoid making a kernel with the same <uname -r>)**
+  * Kernel hacking
+    * Compile-time checks and compiler options
+      * Provide GDB scripts for kernel debugging: `CONFIG_GDB_SCRIPTS=y`
+      * Generate readable assembler code: `CONFIG_READABLE_ASM=y`
+    * x86 Debugging -> Choose kernel unwinder -> Frame pointer unwinder: `CONFIG_UNWINDER_FRAME_POINTER=y`
+* H/G: make sure to use `modprobed-db` to reduce unnecessary compilation
+  * G: `modprobed-db list > <source>/needed_mods`
+  * H: `make LSMOD=needed_mods localmodconfig`
+* H: `make` or `make -j<number of threads>`
+* G: `cp arch/x86/boot/bzImage /boot/vmlinuz_linux_gdb`  
+  (suggest not to use dash but instead underscore so grub doens't automatically pick up your kernel)  
+  (skip if you want to use direct kernel boot. It seems grub does not support `vmlinux`, wtf???)
+* G: `make modules_install`
+* G: `mkinitcpio -k <new uname -r> -g /boot/initramfs_linux_gdb.img`  
+  (use the `-k` option matching your new kernel's `uname -r`, this has to match the module directory `/lib/modules/<uname -r>`)
+* G: `rm -rf /lib/modules/<old uname -r>` as needed
+
+some helpers
+* H: `make compile_commands.json`
+* H: `make cscope`
+* G: `systemctl enable serial-getty@ttyS0.service`
+
+## Add a boot entry on guest
+
+* open `/boot/grub/grub.cfg` and find your default boot menuentry, copy to `/etc/grub.d/40_custom`, and then modify the `linux` and `initrd` accordingly.  
+  (skip if direct kernel boot)
+  * suggest `linux /vmlinuz_linux_gdb root=UUID=<your root's uuid> rw loglevel=3 console=ttyS0,115200 nokaslr`
+  * optionally add `GRUB_TERMINAL_OUTPUT="console vga_text"` in `/etc/default/grub` so that grub menu also works on tty
+  * Finally `grub-mkconfig -o /boot/grub/grub.cfg`
+* shutdown and launch with `virsh start <vm> --console`
+
+## direct kernel boot 
+
+(With virtiofs this seems to be a less attractive option)
+
+Copy out to host the new initramfs.
+
+Adjust xml as follows, make sure to include `nokaslr` if you want gdb to work
+```xml
+...
   <os>
-    <type arch='x86_64' machine='pc-q35-rhel9.2.0'>hvm</type>
+    ...
     <kernel>/path/to/vmlinux</kernel>
-    <initrd>/path/to/initramfs-linux-gdb.img</initrd>
-    <cmdline>root=UUID=_your_root_uuid rw  loglevel=3 console=ttyS0,115200 nokaslr</cmdline>
+    <initrd>/path/to/initramfs_linux_gdb.img</initrd>
+    ...
   </os>
+...
 ```
 
-### avoid compiling on guest and then rsync'ing to host the compiled kernel tree
+## GDB
 
-You should be able to just simply run `make` on host to compile the kernel with modules
+Add to xml the following:
+```xml
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+...
+<qemu:commandline>        
+  <qemu:arg value='-s'/>  
+</qemu:commandline>
+```
 
-Assuming you are unpriviledged on host in the kernel tree root and have the initramfs from the official build or your own in [on guest](#on-guest)
-
-follow these steps to replace the kernel modules with your host built ones.
-
-* `unshare -r` to fake as root
-* `file initramfs_linux_gdb.img` -> initramfs_linux_gdb.img: Zstandard compressed data (v0.8+), Dictionary ID: None
-* ` zstdcat initramfs_linux_gdb.img > initramfs_decomp`
-* `file initramfs_decomp` -> initramfs_decomp: ASCII cpio archive (SVR4 with no CRC)
-* `mkdir initramfs_root`
-  * `cd initramfs_root`
-  * `cpio -i < ../initramfs_decomp`
-  * `cd ..` 
-* `cd initramfs_root/usr/lib/modules/<uname -r of new kernel>/kernel`
-  * `find -name *.ko -exec cp ../../../../../../{} {} \;` to replace all of the *.ko
-  * `cd ../../../../../` (back to the initramfs_root directory)
-  * `find . | cpio -o -c > ../initramfs_decomp`
-  * `file ../initramfs_decomp` verify that it spits out the same information
-  * `cd ..` 
-* `zstd initramfs_decomp -o initramfs_linux_gdb.img`
-  * `file initramfs_linux_gdb.img` also verify
-* `exit` from userns
-
-***Do Direct Kernel Boot!!!***
-
-you may have to redo [on guest](#on-guest) after many updates
+start GDB:
+* `gdb <source>/vmlinux`
+* `target remote :1234`
