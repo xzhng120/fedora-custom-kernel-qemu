@@ -63,24 +63,31 @@ Skip this part if you are doing direct kernel boot.
 * open `/boot/grub/grub.cfg` and find your default boot menuentry, copy to `/etc/grub.d/40_custom`, and then modify the `linux` and `initrd` accordingly.  
   * if you used `localyesconfig` you can leave `initrd` unchanged.  
     (it seems you cannot leave out `initrd` if cmdline contains `root=UUID=...`. If you so insist, use something like `root=/dev/vda2`)
-  * suggest `linux` added with `console=ttyS0,115200 nokaslr`
+  * suggest `linux` be added with `console=ttyS0,115200 nokaslr`
   * optionally add `GRUB_TERMINAL_OUTPUT="console vga_text"` in `/etc/default/grub` so that grub menu also works on tty
   * Finally `grub-mkconfig -o /boot/grub/grub.cfg`
 * shutdown and launch with `virsh start <vm> --console`
 
 ## direct kernel boot 
 
-(With virtiofs this seems to be a less attractive option)
+Create a copy of the VM definition.
 
-Copy out to host the new initramfs.
+```shell
+virsh dumpxml <vm> > <vm.xml>
+# rename <name> to <new_vm> and remove <uuid> from the xml
+virsh define <vm.xml>
+```
 
-Adjust xml as follows, make sure to include `nokaslr` if you want gdb to work
+
+Adjust xml as follows, make sure to include `nokaslr` if you want gdb to work. `initrd` optional depending on boot `cmdline`.  
+`virsh edit <new_vm>`
 ```xml
 ...
   <os>
     ...
-    <kernel>/path/to/vmlinux</kernel>
-    <initrd>/path/to/initramfs_linux_gdb.img</initrd>
+    <kernel>/path/to/kernel/vmlinux</kernel>
+    <initrd>/path/to/your/initramfs</initrd>
+    <cmdline>root=<...> rw loglevel=3 console=ttyS0,115200 nokaslr</cmdline>
     ...
   </os>
 ...
