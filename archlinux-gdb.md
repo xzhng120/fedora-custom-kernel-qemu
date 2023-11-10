@@ -12,13 +12,13 @@ create a shared directory on the host for the source then share it with the gues
     <filesystem type='mount' accessmode='passthrough'>
       <driver type='virtiofs'/>
       <source dir='<kernel source tree>'/>
-      <target dir='kernel-build'/>
+      <target dir='<kernel-build>'/>
       <address type='pci' domain='...' bus='...' slot='...' function='...'/>
     </filesystem>
 ...
 ```
 mount on guest by adding to `/etc/fstab`:
-`kernel-build            /root/linux-gdb virtiofs rw,relatime`
+`<kernel-build>            /root/linux-gdb virtiofs rw,relatime`
 
 ## Compile the kernel
 
@@ -38,13 +38,14 @@ generally follow https://wiki.archlinux.org/title/Kernel/Traditional_compilation
       * Provide GDB scripts for kernel debugging: `CONFIG_GDB_SCRIPTS=y`
       * Generate readable assembler code: `CONFIG_READABLE_ASM=y`
     * x86 Debugging -> Choose kernel unwinder -> Frame pointer unwinder: `CONFIG_UNWINDER_FRAME_POINTER=y`
-* H/G: make sure to use `modprobed-db` to reduce unnecessary compilation
-  * G: `modprobed-db list > <source>/needed_mods`
-  * H: `make LSMOD=needed_mods localmodconfig`
+* H/G: make sure to use `lsmod` or `modprobed-db` to reduce unnecessary compilation
+  * G: `lsmod` or `modprobed-db list > <source>/needed_mods`
+  * H: `make LSMOD=needed_mods localmodconfig` or `make LSMOD=needed_mods localyesconfig`
 * H: `make` or `make -j<number of threads>`
 * G: `cp arch/x86/boot/bzImage /boot/vmlinuz_linux_gdb`  
   (suggest not to use dash but instead underscore so grub doens't automatically pick up your kernel)  
   (skip if you want to use direct kernel boot. It seems grub does not support `vmlinux`, wtf???)
+  * **you can stop here if you used `localyesconfig`**
 * G: `make modules_install`
 * G: `mkinitcpio -k <new uname -r> -g /boot/initramfs_linux_gdb.img`  
   (use the `-k` option matching your new kernel's `uname -r`, this has to match the module directory `/lib/modules/<uname -r>`)
@@ -57,9 +58,12 @@ some helpers
 
 ## Add a boot entry on guest
 
+Skip this part if you are doing direct kernel boot.
+
 * open `/boot/grub/grub.cfg` and find your default boot menuentry, copy to `/etc/grub.d/40_custom`, and then modify the `linux` and `initrd` accordingly.  
-  (skip if direct kernel boot)
-  * suggest `linux /vmlinuz_linux_gdb root=UUID=<your root's uuid> rw loglevel=3 console=ttyS0,115200 nokaslr`
+  * if you used `localyesconfig` you can leave `initrd` unchanged.  
+    (it seems you cannot leave out `initrd` if cmdline contains `root=UUID=...`. If you so insist, use something like `root=/dev/vda2`)
+  * suggest `linux` added with `console=ttyS0,115200 nokaslr`
   * optionally add `GRUB_TERMINAL_OUTPUT="console vga_text"` in `/etc/default/grub` so that grub menu also works on tty
   * Finally `grub-mkconfig -o /boot/grub/grub.cfg`
 * shutdown and launch with `virsh start <vm> --console`
