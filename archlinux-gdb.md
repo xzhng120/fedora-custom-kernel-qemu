@@ -37,7 +37,6 @@ generally follow https://wiki.archlinux.org/title/Kernel/Traditional_compilation
     * Compile-time checks and compiler options
       * Provide GDB scripts for kernel debugging: `CONFIG_GDB_SCRIPTS=y`
       * Generate readable assembler code: `CONFIG_READABLE_ASM=y`
-    * x86 Debugging -> Choose kernel unwinder -> Frame pointer unwinder: `CONFIG_UNWINDER_FRAME_POINTER=y`
 * H/G: make sure to use `lsmod` or `modprobed-db` to reduce unnecessary compilation
   * G: `lsmod` or `modprobed-db list > <source>/needed_mods`
   * H: `make LSMOD=needed_mods localmodconfig` or `make LSMOD=needed_mods localyesconfig`
