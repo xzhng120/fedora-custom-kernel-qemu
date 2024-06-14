@@ -54,6 +54,8 @@ some helpers
 * H: `make compile_commands.json`
 * H: `make cscope`
 * G: `systemctl enable serial-getty@ttyS0.service`
+* A builder script can be found [here](kernel_maker.sh)
+
 
 ## Add a boot entry on guest
 
